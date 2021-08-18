@@ -5,11 +5,15 @@ See [https://docs.benzinga.io/benzinga/newsfeed-stream-v1.html](https://docs.ben
 
 ## Usage/Development
 
+This is provided as an example only. It is not intended to be used as production code.
+
 ### Python
 
 *Requires Python 3+*
 
-Using [Poetry](https://python-poetry.org/docs/), change to `python-newsfeed` and run `poetry install`.
+Assumes Mac/Linux environment.
+
+Using [Poetry](https://python-poetry.org/docs/), clone repo, change to `python-newsfeed` and run `poetry install`.
 
 #### Run
 
