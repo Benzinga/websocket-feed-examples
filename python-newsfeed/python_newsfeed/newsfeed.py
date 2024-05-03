@@ -1,59 +1,52 @@
+import aiohttp
 import asyncio
+import json
 import html
 import logging
-import json
 import os
-import signal
 import sys
-import websockets
 
-BZ_API_KEY = os.getenv('BZ_API_KEY', default='')
+async def consumer(message):
+    try:
+        payload = json.loads(message)
+        event_info = {
+            'kind': payload["kind"],
+            'id': payload["data"]["id"],
+            'action': payload["data"]["action"],
+            'ts': payload["data"]["timestamp"]
+        }
 
+        if payload["data"].get("content"):
+            event_info.update({
+                'content_id': payload["data"]["content"]["id"],
+                'title': html.unescape(payload["data"]["content"]["title"])
+            })
+            event_template = "{kind} event received.\n\tAction: {action}\n\tEvent ID: {id}\n\tContent ID: {content_id}\n\tTitle: {title}\n\tTimestamp(UTC): {ts}\n"
+        else:
+            event_template = "{kind} event received.\n\tAction: {action}\n\tEvent ID: {id}\n\tTimestamp(UTC): {ts}\n"
 
-def consumer(message):
-    payload = json.loads(message)
-
-    if payload["data"]["content"]:
-        print("{kind} event received.\n\tAction: {action}\n\tEvent ID: {id}\n\tContent ID: {content_id}\n\tTitle: {title}\n\tTimestamp(UTC): {ts}\n".format(
-            kind=payload["kind"],
-            id=payload["data"]["id"],
-            action=payload["data"]["action"],
-            content_id=payload["data"]["content"]["id"],
-            title=html.unescape(payload["data"]["content"]["title"]),
-            ts=payload["data"]["timestamp"]
-        ))
-    else:
-        print("{kind} event received.\n\tAction: {action}\n\tEvent ID: {id}\n\tTimestamp(UTC): {ts}\n".format(
-            kind=payload["kind"],
-            id=payload["data"]["id"],
-            action=payload["data"]["action"],
-            ts=payload["data"]["timestamp"]
-        ))
-
+        print(event_template.format(**event_info))
+    except json.JSONDecodeError:
+        logging.error("Error decoding JSON from message")
+    except KeyError as e:
+        logging.error(f"Missing key in JSON data: {e}")
 
 async def runStream():
-    if BZ_API_KEY == '':
+    bz_api_key = os.getenv('BZ_API_KEY')
+    if not bz_api_key:
         sys.exit('BZ_API_KEY must not be empty')
 
-    uri = 'wss://api.benzinga.com/api/v1/news/stream?token={key}'.format(
-        key=BZ_API_KEY)
+    uri = f'wss://api.benzinga.com/api/v1/news/stream?token={bz_api_key}'
+    logging.basicConfig(level=logging.INFO)
+    logging.info(f"Connecting to {uri}")
 
-    logger = logging.getLogger('websockets')
-    logger.setLevel(logging.INFO)  # change to debug if needed
-    logger.addHandler(logging.StreamHandler())
+    async with aiohttp.ClientSession() as session:
+        async with session.ws_connect(uri, max_msg_size=10_000_000_000) as ws:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    await consumer(msg.data)
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    break
 
-    logging.info("connecting to {}", uri)
-
-    # messages can be over 1MB, increase max_size from default
-    async with websockets.connect(uri, max_size=10_000_000_000) as websocket:
-        # Close the connection when receiving SIGTERM.
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(
-            signal.SIGTERM, loop.create_task, websocket.close())
-
-        async for message in websocket:
-            # This is where you would call your logic.
-            consumer(message)
-
-# run until disconnect
-asyncio.get_event_loop().run_until_complete(runStream())
+if __name__ == '__main__':
+    asyncio.run(runStream())
